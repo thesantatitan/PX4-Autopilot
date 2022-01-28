@@ -135,16 +135,17 @@ private:
 	 */
 	void data_link_check();
 
-	void manual_control_check();
+	void manualControlCheck();
 
 	bool handle_command(const vehicle_command_s &cmd);
 
 	unsigned handle_command_motor_test(const vehicle_command_s &cmd);
+
 	unsigned handle_command_actuator_test(const vehicle_command_s &cmd);
 
 	void executeActionRequest(const action_request_s &action_request);
 
-	void offboard_control_update();
+	void offboardControlUpdate();
 
 	void print_reject_mode(uint8_t main_state);
 
@@ -155,14 +156,25 @@ private:
 	void send_parachute_command();
 
 	void checkWindSpeedThresholds();
+
 	void checkForMissionUpdate();
+
+	void checkGeofenceStatus();
+
 	void handlePowerButtonState();
+
 	void systemPowerUpdate();
+
 	void landDetectorUpdate();
+
 	void safetyButtonUpdate();
+
 	void vtolStatusUpdate();
+
 	void updateTunes();
+
 	void checkWorkerThread();
+
 	bool getPrearmState() const;
 
 	void handleAutoDisarm();
@@ -273,8 +285,10 @@ private:
 	bool		_geofence_loiter_on{false};
 	bool		_geofence_rtl_on{false};
 	bool		_geofence_land_on{false};
-	bool		_geofence_warning_action_on{false};
-	bool		_geofence_violated_prev{false};
+	bool		_primary_geofence_warning_action_on{false};
+	bool		_primary_geofence_breached_prev{false};
+	bool		_secondary_geofence_warning_action_on{false};
+	bool		_secondary_geofence_breached_prev{false};
 
 	bool         _circuit_breaker_flight_termination_disabled{false};
 
