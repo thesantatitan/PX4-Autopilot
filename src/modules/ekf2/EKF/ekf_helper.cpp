@@ -44,14 +44,6 @@
 #include <mathlib/mathlib.h>
 #include <cstdlib>
 
-void Ekf::resetVelocityToGps(const gpsSample &gps_sample_delayed)
-{
-	_information_events.flags.reset_vel_to_gps = true;
-	ECL_INFO("reset velocity to GPS");
-	resetVelocityTo(gps_sample_delayed.vel);
-	P.uncorrelateCovarianceSetVariance<3>(4, sq(gps_sample_delayed.sacc));
-}
-
 void Ekf::resetHorizontalVelocityToOpticalFlow()
 {
 	_information_events.flags.reset_vel_to_flow = true;
@@ -81,14 +73,6 @@ void Ekf::resetHorizontalVelocityToOpticalFlow()
 
 	// reset the horizontal velocity variance using the optical flow noise variance
 	P.uncorrelateCovarianceSetVariance<2>(4, sq(range) * calcOptFlowMeasVar());
-}
-
-void Ekf::resetVelocityToVision()
-{
-	_information_events.flags.reset_vel_to_vision = true;
-	ECL_INFO("reset to vision velocity");
-	resetVelocityTo(getVisionVelocityInEkfFrame());
-	P.uncorrelateCovarianceSetVariance<3>(4, getVisionVelocityVarianceInEkfFrame());
 }
 
 void Ekf::resetHorizontalVelocityToZero()
@@ -142,31 +126,6 @@ void Ekf::resetVerticalVelocityTo(float new_vert_vel)
 
 	// Reset the timout timer
 	_time_last_ver_vel_fuse = _time_last_imu;
-}
-
-void Ekf::resetHorizontalPositionToGps(const gpsSample &gps_sample_delayed)
-{
-	_information_events.flags.reset_pos_to_gps = true;
-	ECL_INFO("reset position to GPS");
-	resetHorizontalPositionTo(gps_sample_delayed.pos);
-	P.uncorrelateCovarianceSetVariance<2>(7, sq(gps_sample_delayed.hacc));
-}
-
-void Ekf::resetHorizontalPositionToVision()
-{
-	_information_events.flags.reset_pos_to_vision = true;
-	ECL_INFO("reset position to ev position");
-	Vector3f _ev_pos = _ev_sample_delayed.pos;
-
-	if (_params.fusion_mode & SensorFusionMask::ROTATE_EXT_VIS) {
-		_ev_pos = _R_ev_to_ekf * _ev_sample_delayed.pos;
-	}
-
-	resetHorizontalPositionTo(Vector2f(_ev_pos));
-	P.uncorrelateCovarianceSetVariance<2>(7, _ev_sample_delayed.posVar.slice<2, 1>(0, 0));
-
-	// let the next odometry update know that the previous value of states cannot be used to calculate the change in position
-	_hpos_prev_available = false;
 }
 
 void Ekf::resetHorizontalPositionToOpticalFlow()
@@ -297,7 +256,12 @@ void Ekf::resetHeightToEv()
 	_information_events.flags.reset_hgt_to_ev = true;
 
 	const float z_pos_before_reset = _state.pos(2);
-	resetVerticalPositionTo(_ev_sample_delayed.pos(2));
+
+	const Vector3f pos_offset_body = _params.ev_pos_body - _params.imu_pos_body;
+	const Vector3f pos_offset_earth = _R_to_earth * pos_offset_body;
+	const Vector3f position = _ev_sample_delayed.pos - pos_offset_earth;
+
+	resetVerticalPositionTo(position(2));
 
 	// the state variance is the same as the observation
 	P.uncorrelateCovarianceSetVariance<1>(9, fmaxf(_ev_sample_delayed.posVar(2), sq(0.01f)));
@@ -348,115 +312,63 @@ void Ekf::alignOutputFilter()
 	_output_new = _output_buffer.get_newest();
 }
 
-// Do a forced re-alignment of the yaw angle to align with the horizontal velocity vector from the GPS.
-// It is used to align the yaw angle after launch or takeoff for fixed wing vehicle only.
-bool Ekf::realignYawGPS(const Vector3f &mag)
+bool Ekf::realignYawGPS(const Vector3f gnss_velocity, const float speed_accuracy)
 {
-	const float gpsSpeed = sqrtf(sq(_gps_sample_delayed.vel(0)) + sq(_gps_sample_delayed.vel(1)));
+	if (!_control_status.flags.in_air || !_control_status.flags.fixed_wing) {
+		return false;
+	}
+
+	const float gps_speed = sqrtf(sq(gnss_velocity(0)) + sq(gnss_velocity(1)));
 
 	// Need at least 5 m/s of GPS horizontal speed and
 	// ratio of velocity error to velocity < 0.15  for a reliable alignment
-	const bool gps_yaw_alignment_possible = (gpsSpeed > 5.0f) && (_gps_sample_delayed.sacc < (0.15f * gpsSpeed));
+	const bool gps_yaw_alignment_possible = (gps_speed > 5.f) && (speed_accuracy < (0.15f * gps_speed));
 
 	if (!gps_yaw_alignment_possible) {
 		// attempt a normal alignment using the magnetometer
-		return resetMagHeading();
+		return false;
 	}
-
-	// check for excessive horizontal GPS velocity innovations
-	const float gps_vel_test_ratio = fmaxf(_aid_src_gnss_vel.test_ratio[0], _aid_src_gnss_vel.test_ratio[1]);
-	const bool badVelInnov = (gps_vel_test_ratio > 1.0f) && _control_status.flags.gps;
 
 	// calculate GPS course over ground angle
-	const float gpsCOG = atan2f(_gps_sample_delayed.vel(1), _gps_sample_delayed.vel(0));
+	const float gps_cog = atan2f(gnss_velocity(1), gnss_velocity(0));
 
 	// calculate course yaw angle
-	const float ekfCOG = atan2f(_state.vel(1), _state.vel(0));
+	const float ekf_cog = atan2f(_state.vel(1), _state.vel(0));
 
 	// Check the EKF and GPS course over ground for consistency
-	const float courseYawError = wrap_pi(gpsCOG - ekfCOG);
-
-	// If the angles disagree and horizontal GPS velocity innovations are large or no previous yaw alignment, we declare the magnetic yaw as bad
-	const bool badYawErr = fabsf(courseYawError) > 0.5f;
-	const bool badMagYaw = (badYawErr && badVelInnov);
-
-	if (badMagYaw) {
-		_num_bad_flight_yaw_events++;
-	}
+	const float course_yaw_error = wrap_pi(gps_cog - ekf_cog);
 
 	// correct yaw angle using GPS ground course if compass yaw bad or yaw is previously not aligned
-	if (badMagYaw || !_control_status.flags.yaw_align) {
-		_warning_events.flags.bad_yaw_using_gps_course = true;
-		ECL_WARN("bad yaw, using GPS course");
+	if (!_control_status.flags.yaw_align || (fabsf(course_yaw_error) > math::radians(25.f))) {
 
-		// declare the magnetometer as failed if a bad yaw has occurred more than once
-		if (_control_status.flags.mag_aligned_in_flight && (_num_bad_flight_yaw_events >= 2)
-		    && !_control_status.flags.mag_fault) {
-			_warning_events.flags.stopping_mag_use = true;
-			ECL_WARN("stopping mag use");
-			_control_status.flags.mag_fault = true;
-		}
+		ECL_INFO("reset yaw to GNSS course");
 
 		// calculate new yaw estimate
-		float yaw_new;
+		float yaw_new = gps_cog;
 
-		if (!_control_status.flags.mag_aligned_in_flight) {
-			// This is our first flight alignment so we can assume that the recent change in velocity has occurred due to a
-			// forward direction takeoff or launch and therefore the inertial and GPS ground course discrepancy is due to yaw error
-			const float current_yaw = getEulerYaw(_R_to_earth);
-			yaw_new = current_yaw + courseYawError;
-			_control_status.flags.mag_aligned_in_flight = true;
-
-		} else if (_control_status.flags.wind) {
+		if (_control_status.flags.wind) {
 			// we have previously aligned yaw in-flight and have wind estimates so set the yaw such that the vehicle nose is
 			// aligned with the wind relative GPS velocity vector
-			yaw_new = atan2f((_gps_sample_delayed.vel(1) - _state.wind_vel(1)),
-					 (_gps_sample_delayed.vel(0) - _state.wind_vel(0)));
-
-		} else {
-			// we don't have wind estimates, so align yaw to the GPS velocity vector
-			yaw_new = atan2f(_gps_sample_delayed.vel(1), _gps_sample_delayed.vel(0));
-
+			yaw_new = atan2f((gnss_velocity(1) - _state.wind_vel(1)),
+					 (gnss_velocity(0) - _state.wind_vel(0)));
 		}
 
 		// use the combined EKF and GPS speed variance to calculate a rough estimate of the yaw error after alignment
-		const float SpdErrorVariance = sq(_gps_sample_delayed.sacc) + P(4, 4) + P(5, 5);
-		const float sineYawError = math::constrain(sqrtf(SpdErrorVariance) / gpsSpeed, 0.0f, 1.0f);
-		const float yaw_variance_new = sq(asinf(sineYawError));
+		const float speed_error_var = sq(speed_accuracy) + P(4, 4) + P(5, 5);
+		const float sine_yaw_error = math::constrain(sqrtf(speed_error_var) / gps_speed, 0.f, 1.f);
+		const float yaw_variance_new = sq(asinf(sine_yaw_error));
+
+		// TODO: reset the field states
+		stopMagFusion();
 
 		// Apply updated yaw and yaw variance to states and covariances
-		resetQuatStateYaw(yaw_new, yaw_variance_new, true);
-
-		// Use the last magnetometer measurements to reset the field states
-		_state.mag_B.zero();
-		_state.mag_I = _R_to_earth * mag;
-
-		resetMagCov();
-
-		// record the start time for the magnetic field alignment
-		_flt_mag_align_start_time = _imu_sample_delayed.time_us;
-
-		// If heading was bad, then we also need to reset the velocity and position states
-		if (badMagYaw) {
-			resetVelocityToGps(_gps_sample_delayed);
-			resetHorizontalPositionToGps(_gps_sample_delayed);
-		}
-
-		return true;
-
-	} else {
-		// align mag states only
-
-		// calculate initial earth magnetic field states
-		_state.mag_I = _R_to_earth * mag;
-
-		resetMagCov();
-
-		// record the start time for the magnetic field alignment
-		_flt_mag_align_start_time = _imu_sample_delayed.time_us;
+		resetQuatStateYaw(yaw_new, yaw_variance_new);
+		_control_status.flags.yaw_align = true;
 
 		return true;
 	}
+
+	return false;
 }
 
 // Reset heading and magnetic field states
@@ -477,7 +389,7 @@ bool Ekf::resetMagHeading()
 		return false;
 	}
 
-	const bool heading_required_for_navigation = _control_status.flags.gps;
+	const bool heading_required_for_navigation = _control_status.flags.gps || (_control_status.flags.ev_yaw && _control_status.flags.yaw_align);
 
 	if ((_params.mag_fusion_type <= MagFuseType::MAG_3D) || ((_params.mag_fusion_type == MagFuseType::INDOOR) && heading_required_for_navigation)) {
 
@@ -506,17 +418,6 @@ bool Ekf::resetMagHeading()
 	}
 
 	return false;
-}
-
-bool Ekf::resetYawToEv()
-{
-	const float yaw_new = getEulerYaw(_ev_sample_delayed.quat);
-	const float yaw_new_variance = fmaxf(_ev_sample_delayed.angVar, sq(1.0e-2f));
-
-	resetQuatStateYaw(yaw_new, yaw_new_variance, true);
-	_R_ev_to_ekf.setIdentity();
-
-	return true;
 }
 
 // Return the magnetic declination in radians to be used by the alignment and fusion processing
@@ -629,30 +530,33 @@ void Ekf::getGpsVelPosInnovRatio(float &hvel, float &vvel, float &hpos, float &v
 
 void Ekf::getEvVelPosInnov(float hvel[2], float &vvel, float hpos[2], float &vpos) const
 {
-	hvel[0] = _ev_vel_innov(0);
-	hvel[1] = _ev_vel_innov(1);
-	vvel    = _ev_vel_innov(2);
-	hpos[0] = _ev_pos_innov(0);
-	hpos[1] = _ev_pos_innov(1);
-	vpos    = _ev_pos_innov(2);
+	hvel[0] = _aid_src_ev_vel.innovation[0];
+	hvel[1] = _aid_src_ev_vel.innovation[1];
+	vvel    = _aid_src_ev_vel.innovation[2];
+
+	hpos[0] = _aid_src_ev_pos.innovation[0];
+	hpos[1] = _aid_src_ev_pos.innovation[1];
+	vpos    = _aid_src_ev_pos.innovation[2];
 }
 
 void Ekf::getEvVelPosInnovVar(float hvel[2], float &vvel, float hpos[2], float &vpos) const
 {
-	hvel[0] = _ev_vel_innov_var(0);
-	hvel[1] = _ev_vel_innov_var(1);
-	vvel    = _ev_vel_innov_var(2);
-	hpos[0] = _ev_pos_innov_var(0);
-	hpos[1] = _ev_pos_innov_var(1);
-	vpos    = _ev_pos_innov_var(2);
+	hvel[0] = _aid_src_ev_vel.innovation_variance[0];
+	hvel[1] = _aid_src_ev_vel.innovation_variance[1];
+	vvel    = _aid_src_ev_vel.innovation_variance[2];
+
+	hpos[0] = _aid_src_ev_pos.innovation_variance[0];
+	hpos[1] = _aid_src_ev_pos.innovation_variance[1];
+	vpos    = _aid_src_ev_pos.innovation_variance[2];
 }
 
 void Ekf::getEvVelPosInnovRatio(float &hvel, float &vvel, float &hpos, float &vpos) const
 {
-	hvel = _ev_vel_test_ratio(0);
-	vvel = _ev_vel_test_ratio(1);
-	hpos = _ev_pos_test_ratio(0);
-	vpos = _ev_pos_test_ratio(1);
+	hvel = fmaxf(_aid_src_ev_vel.test_ratio[0], _aid_src_ev_vel.test_ratio[1]);
+	vvel = _aid_src_ev_vel.test_ratio[2];
+
+	hpos = fmaxf(_aid_src_ev_pos.test_ratio[0], _aid_src_ev_pos.test_ratio[1]);
+	vpos = _aid_src_ev_pos.test_ratio[2];
 }
 
 void Ekf::getAuxVelInnov(float aux_vel_innov[2]) const
@@ -736,7 +640,6 @@ bool Ekf::setEkfGlobalOrigin(const double latitude, const double longitude, cons
 			_baro_hgt_offset += _state_reset_status.posD_change;
 
 			_rng_hgt_offset += _state_reset_status.posD_change;
-			_ev_hgt_offset -= _state_reset_status.posD_change;
 		}
 
 		return true;
@@ -762,7 +665,7 @@ void Ekf::get_ekf_gpos_accuracy(float *ekf_eph, float *ekf_epv) const
 		}
 
 		if (_control_status.flags.ev_pos) {
-			hpos_err = math::max(hpos_err, sqrtf(sq(_ev_pos_innov(0)) + sq(_ev_pos_innov(1))));
+			hpos_err = math::max(hpos_err, Vector2f(_aid_src_ev_pos.innovation).norm());
 		}
 	}
 
@@ -807,11 +710,11 @@ void Ekf::get_ekf_vel_accuracy(float *ekf_evh, float *ekf_evv) const
 			vel_err_conservative = math::max(vel_err_conservative, Vector2f(_aid_src_gnss_pos.innovation).norm());
 
 		} else if (_control_status.flags.ev_pos) {
-			vel_err_conservative = math::max(vel_err_conservative, sqrtf(sq(_ev_pos_innov(0)) + sq(_ev_pos_innov(1))));
+			vel_err_conservative = math::max(vel_err_conservative, Vector2f(_aid_src_ev_pos.innovation).norm());
 		}
 
 		if (_control_status.flags.ev_vel) {
-			vel_err_conservative = math::max(vel_err_conservative, sqrtf(sq(_ev_vel_innov(0)) + sq(_ev_vel_innov(1))));
+			vel_err_conservative = math::max(vel_err_conservative, Vector2f(_aid_src_ev_pos.innovation).norm());
 		}
 
 		hvel_err = math::max(hvel_err, vel_err_conservative);
@@ -956,12 +859,12 @@ void Ekf::get_innovation_test_status(uint16_t &status, float &mag, float &vel, f
 	}
 
 	if (_control_status.flags.ev_vel) {
-		float ev_vel = sqrtf(math::max(_ev_vel_test_ratio(0), _ev_vel_test_ratio(1)));
+		float ev_vel = sqrtf(Vector3f(_aid_src_ev_vel.test_ratio).max());
 		vel = math::max(vel, ev_vel, FLT_MIN);
 	}
 
 	if (_control_status.flags.ev_pos) {
-		float ev_pos = sqrtf(_ev_pos_test_ratio(0));
+		float ev_pos = sqrtf(Vector2f(_aid_src_ev_pos.test_ratio).max());
 		pos = math::max(pos, ev_pos, FLT_MIN);
 	}
 
@@ -981,7 +884,7 @@ void Ekf::get_innovation_test_status(uint16_t &status, float &mag, float &vel, f
 		hgt = math::max(sqrtf(_aid_src_rng_hgt.test_ratio), FLT_MIN);
 
 	} else if (_control_status.flags.ev_hgt) {
-		hgt = math::max(sqrtf(_ev_pos_test_ratio(1)), FLT_MIN);
+		hgt = math::max(sqrtf(_aid_src_ev_pos.test_ratio[2]), FLT_MIN);
 
 	} else {
 		hgt = NAN;
@@ -1270,9 +1173,12 @@ void Ekf::setControlEVHeight()
 
 void Ekf::stopMagFusion()
 {
-	stopMag3DFusion();
-	stopMagHdgFusion();
-	clearMagCov();
+	if (_control_status.flags.mag_hdg || _control_status.flags.mag_3D) {
+		ECL_INFO("stopping all mag fusion");
+		stopMag3DFusion();
+		stopMagHdgFusion();
+		clearMagCov();
+	}
 }
 
 void Ekf::stopMag3DFusion()
@@ -1477,64 +1383,6 @@ void Ekf::updateGroundEffect()
 	}
 }
 
-Vector3f Ekf::getVisionVelocityInEkfFrame() const
-{
-	Vector3f vel;
-	// correct velocity for offset relative to IMU
-	const Vector3f pos_offset_body = _params.ev_pos_body - _params.imu_pos_body;
-	const Vector3f vel_offset_body = _ang_rate_delayed_raw % pos_offset_body;
-
-	// rotate measurement into correct earth frame if required
-	switch (_ev_sample_delayed.vel_frame) {
-	case VelocityFrame::BODY_FRAME_FRD:
-		vel = _R_to_earth * (_ev_sample_delayed.vel - vel_offset_body);
-		break;
-
-	case VelocityFrame::LOCAL_FRAME_FRD:
-		const Vector3f vel_offset_earth = _R_to_earth * vel_offset_body;
-
-		if (_params.fusion_mode & SensorFusionMask::ROTATE_EXT_VIS) {
-			vel = _R_ev_to_ekf * _ev_sample_delayed.vel - vel_offset_earth;
-
-		} else {
-			vel = _ev_sample_delayed.vel - vel_offset_earth;
-		}
-
-		break;
-	}
-
-	return vel;
-}
-
-Vector3f Ekf::getVisionVelocityVarianceInEkfFrame() const
-{
-	Matrix3f ev_vel_cov = matrix::diag(_ev_sample_delayed.velVar);
-
-	// rotate measurement into correct earth frame if required
-	switch (_ev_sample_delayed.vel_frame) {
-	case VelocityFrame::BODY_FRAME_FRD:
-		ev_vel_cov = _R_to_earth * ev_vel_cov * _R_to_earth.transpose();
-		break;
-
-	case VelocityFrame::LOCAL_FRAME_FRD:
-		if (_params.fusion_mode & SensorFusionMask::ROTATE_EXT_VIS) {
-			ev_vel_cov = _R_ev_to_ekf * ev_vel_cov * _R_ev_to_ekf.transpose();
-		}
-
-		break;
-	}
-
-	return ev_vel_cov.diag();
-}
-
-// update the rotation matrix which rotates EV measurements into the EKF's navigation frame
-void Ekf::calcExtVisRotMat()
-{
-	// Calculate the quaternion delta that rotates from the EV to the EKF reference frame at the EKF fusion time horizon.
-	const Quatf q_error((_state.quat_nominal * _ev_sample_delayed.quat.inversed()).normalized());
-	_R_ev_to_ekf = Dcmf(q_error);
-}
-
 // Increase the yaw error variance of the quaternions
 // Argument is additional yaw variance in rad**2
 void Ekf::increaseQuatYawErrVariance(float yaw_variance)
@@ -1624,22 +1472,6 @@ void Ekf::stopAirspeedFusion()
 	_control_status.flags.fuse_aspd = false;
 }
 
-void Ekf::startGpsFusion()
-{
-	if (!_control_status.flags.gps) {
-		resetHorizontalPositionToGps(_gps_sample_delayed);
-
-		// when already using another velocity source velocity reset is not necessary
-		if (!_control_status.flags.opt_flow && !_control_status.flags.ev_vel) {
-			resetVelocityToGps(_gps_sample_delayed);
-		}
-
-		_information_events.flags.starting_gps_fusion = true;
-		ECL_INFO("starting GPS fusion");
-		_control_status.flags.gps = true;
-	}
-}
-
 void Ekf::stopGpsFusion()
 {
 	if (_control_status.flags.gps) {
@@ -1652,10 +1484,6 @@ void Ekf::stopGpsFusion()
 	if (_control_status.flags.gps_yaw) {
 		stopGpsYawFusion();
 	}
-
-	// We do not need to know the true North anymore
-	// EV yaw can start again
-	_inhibit_ev_yaw_use = false;
 }
 
 void Ekf::stopGpsPosFusion()
@@ -1677,85 +1505,12 @@ void Ekf::stopGpsVelFusion()
 	resetEstimatorAidStatus(_aid_src_gnss_vel);
 }
 
-void Ekf::startGpsYawFusion()
-{
-	if (!_control_status.flags.gps_yaw && resetYawToGps()) {
-		ECL_INFO("starting GPS yaw fusion");
-		_control_status.flags.yaw_align = true;
-		_control_status.flags.mag_dec = false;
-		stopEvYawFusion();
-		stopMagHdgFusion();
-		stopMag3DFusion();
-		_control_status.flags.gps_yaw = true;
-	}
-}
-
 void Ekf::stopGpsYawFusion()
 {
 	if (_control_status.flags.gps_yaw) {
 		ECL_INFO("stopping GPS yaw fusion");
 		_control_status.flags.gps_yaw = false;
 		resetEstimatorAidStatus(_aid_src_gnss_yaw);
-	}
-}
-
-void Ekf::startEvPosFusion()
-{
-	_control_status.flags.ev_pos = true;
-	resetHorizontalPositionToVision();
-	_information_events.flags.starting_vision_pos_fusion = true;
-	ECL_INFO("starting vision pos fusion");
-}
-
-void Ekf::startEvVelFusion()
-{
-	_control_status.flags.ev_vel = true;
-	resetVelocityToVision();
-	_information_events.flags.starting_vision_vel_fusion = true;
-	ECL_INFO("starting vision vel fusion");
-}
-
-void Ekf::startEvYawFusion()
-{
-	// turn on fusion of external vision yaw measurements and disable all magnetometer fusion
-	_control_status.flags.ev_yaw = true;
-	_control_status.flags.mag_dec = false;
-
-	stopMagHdgFusion();
-	stopMag3DFusion();
-
-	_information_events.flags.starting_vision_yaw_fusion = true;
-	ECL_INFO("starting vision yaw fusion");
-}
-
-void Ekf::stopEvFusion()
-{
-	stopEvPosFusion();
-	stopEvVelFusion();
-	stopEvYawFusion();
-}
-
-void Ekf::stopEvPosFusion()
-{
-	_control_status.flags.ev_pos = false;
-	_ev_pos_innov.setZero();
-	_ev_pos_innov_var.setZero();
-	_ev_pos_test_ratio.setZero();
-}
-
-void Ekf::stopEvVelFusion()
-{
-	_control_status.flags.ev_vel = false;
-	_ev_vel_innov.setZero();
-	_ev_vel_innov_var.setZero();
-	_ev_vel_test_ratio.setZero();
-}
-
-void Ekf::stopEvYawFusion()
-{
-	if (_control_status.flags.ev_yaw) {
-		ECL_INFO("stopping EV yaw fusion");
-		_control_status.flags.ev_yaw = false;
 	}
 }
 
@@ -1824,34 +1579,24 @@ void Ekf::resetQuatStateYaw(float yaw, float yaw_variance, bool update_buffer)
 // Returns true if the reset was successful
 bool Ekf::resetYawToEKFGSF()
 {
-	if (!isYawEmergencyEstimateAvailable()) {
-		return false;
+	// The minimum time interval between resets to the EKF-GSF estimate is limited to allow the EKF-GSF time
+	// to improve its estimate if the previous reset was not successful.
+	if (isYawEmergencyEstimateAvailable()
+	&& isTimedOut(_ekfgsf_yaw_reset_time, 5'000'000)
+	&& (_ekfgsf_yaw_reset_count <= _params.EKFGSF_reset_count_limit)) {
+
+		resetQuatStateYaw(_yawEstimator.getYaw(), _yawEstimator.getYawVar());
+
+		_control_status.flags.yaw_align = true;
+		_information_events.flags.yaw_aligned_to_imu_gps = true;
+
+		_ekfgsf_yaw_reset_time = _time_last_imu;
+		_ekfgsf_yaw_reset_count++;
+
+		return true;
 	}
 
-	resetQuatStateYaw(_yawEstimator.getYaw(), _yawEstimator.getYawVar(), true);
-
-	// record a magnetic field alignment event to prevent possibility of the EKF trying to reset the yaw to the mag later in flight
-	_flt_mag_align_start_time = _imu_sample_delayed.time_us;
-	_control_status.flags.yaw_align = true;
-
-	if (_control_status.flags.mag_hdg || _control_status.flags.mag_3D) {
-		// stop using the magnetometer in the main EKF otherwise it's fusion could drag the yaw around
-		// and cause another navigation failure
-		_control_status.flags.mag_fault = true;
-		_warning_events.flags.emergency_yaw_reset_mag_stopped = true;
-
-	} else if (_control_status.flags.gps_yaw) {
-		_control_status.flags.gps_yaw_fault = true;
-		_warning_events.flags.emergency_yaw_reset_gps_yaw_stopped = true;
-
-	} else if (_control_status.flags.ev_yaw) {
-		_inhibit_ev_yaw_use = true;
-	}
-
-	_ekfgsf_yaw_reset_time = _time_last_imu;
-	_ekfgsf_yaw_reset_count++;
-
-	return true;
+	return false;
 }
 
 bool Ekf::isYawEmergencyEstimateAvailable() const
@@ -1875,8 +1620,8 @@ void Ekf::runYawEKFGSF()
 {
 	float TAS = 0.f;
 
-	if (_control_status.flags.fixed_wing) {
-		if (isTimedOut(_airspeed_sample_delayed.time_us, 1000000)) {
+	if (_control_status.flags.in_air && _control_status.flags.fixed_wing) {
+		if (isTimedOut(_airspeed_sample_delayed.time_us, 1'000'000)) {
 			TAS = _params.EKFGSF_tas_default;
 
 		} else if (_airspeed_sample_delayed.true_airspeed >= _params.arsp_thr) {
@@ -1884,13 +1629,20 @@ void Ekf::runYawEKFGSF()
 		}
 	}
 
+	const bool run_yaw_estimator = _control_status.flags.in_air || !_control_status.flags.vehicle_at_rest;
 	const Vector3f imu_gyro_bias = getGyroBias();
-	_yawEstimator.update(_imu_sample_delayed, _control_status.flags.in_air, TAS, imu_gyro_bias);
+
+	_yawEstimator.update(_imu_sample_delayed, run_yaw_estimator, TAS, imu_gyro_bias);
 
 	// basic sanity check on GPS velocity data
 	if (_gps_data_ready && _gps_sample_delayed.vacc > FLT_EPSILON &&
 	    PX4_ISFINITE(_gps_sample_delayed.vel(0)) && PX4_ISFINITE(_gps_sample_delayed.vel(1))) {
 		_yawEstimator.setVelocity(_gps_sample_delayed.vel.xy(), _gps_sample_delayed.vacc);
+	}
+
+	// reset when landed
+	if (!_control_status.flags.in_air) {
+		_ekfgsf_yaw_reset_count = 0;
 	}
 }
 

@@ -201,7 +201,7 @@ void Ekf::fuseGpsYaw()
 	}
 }
 
-bool Ekf::resetYawToGps()
+bool Ekf::resetYawToGps(const float gnss_yaw)
 {
 	// define the predicted antenna array vector and rotate into earth frame
 	const Vector3f ant_vec_bf = {cosf(_gps_yaw_offset), sinf(_gps_yaw_offset), 0.0f};
@@ -213,13 +213,23 @@ bool Ekf::resetYawToGps()
 	}
 
 	// GPS yaw measurement is alreday compensated for antenna offset in the driver
-	const float measured_yaw = _gps_sample_delayed.yaw;
+	const float measured_yaw = gnss_yaw;
 
-	const float yaw_variance = sq(fmaxf(_params.gps_heading_noise, 1.e-2f));
-	resetQuatStateYaw(measured_yaw, yaw_variance, true);
+	if (PX4_ISFINITE(measured_yaw) && !_control_status.flags.gps_yaw_fault) {
 
-	_aid_src_gnss_yaw.time_last_fuse = _time_last_imu;
-	_gnss_yaw_signed_test_ratio_lpf.reset(0.f);
+		// TODO: resetMagStates();
+		stopMagFusion();
 
-	return true;
+		const float yaw_variance = sq(fmaxf(_params.gps_heading_noise, 1.e-2f));
+		resetQuatStateYaw(measured_yaw, yaw_variance);
+
+		_control_status.flags.yaw_align = true;
+
+		_aid_src_gnss_yaw.time_last_fuse = _time_last_imu;
+		_gnss_yaw_signed_test_ratio_lpf.reset(0.f);
+
+		return true;
+	}
+
+	return false;
 }
