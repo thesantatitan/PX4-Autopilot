@@ -34,6 +34,7 @@ set MIXER_FILE none
 set MIXER_EXTRA none
 set OUTPUT_MODE none
 set PARAM_FILE ""
+set PARAM_BACKUP_FILE ""
 set PWM_OUT none
 set PWM_MAIN_RATE p:PWM_MAIN_RATE
 set PWM_AUX_OUT none
@@ -108,6 +109,7 @@ then
 	fi
 
 	set PARAM_FILE /fs/microsd/params
+	set PARAM_BACKUP_FILE "/fs/microsd/parameters_backup.bson"
 fi
 
 #
@@ -147,27 +149,32 @@ else
 
 		if [ -d "/fs/microsd" ]
 		then
-			dmesg >> /fs/microsd/param_import_fail.txt &
-
 			# try to make a backup copy
-			cp $PARAM_FILE /fs/microsd/param_import_fail.bson &
-		fi
+			cp $PARAM_FILE /fs/microsd/param_import_fail.bson
 
-		# try importing from backup file
-		if [ -f "/fs/microsd/parameters_backup.bson" ]
-		then
-			echo "[init] importing from parameter backup"
+			# try importing from backup file
+			if [ -f $PARAM_BACKUP_FILE ]
+			then
+				echo "[init] importing from parameter backup"
 
-			# dump current backup file contents for comparison
-			param dump /fs/microsd/parameters_backup.bson
+				# dump current backup file contents for comparison
+				param dump $PARAM_BACKUP_FILE
 
-			param import /fs/microsd/parameters_backup.bson
+				param import $PARAM_BACKUP_FILE
+
+				# overwrite invalid $PARAM_FILE with backup
+				cp $PARAM_BACKUP_FILE $PARAM_FILE
+			fi
+
+			param status
+
+			dmesg >> /fs/microsd/param_import_fail.txt &
 		fi
 	fi
 
 	if [ $SDCARD_AVAILABLE = yes ]
 	then
-		param select-backup /fs/microsd/parameters_backup.bson
+		param select-backup $PARAM_BACKUP_FILE
 	fi
 
 	if ver hwcmp PX4_FMU_V5X PX4_FMU_V6X
@@ -567,6 +574,7 @@ unset MIXER_AUX
 unset MIXER_FILE
 unset OUTPUT_MODE
 unset PARAM_FILE
+unset PARAM_BACKUP_FILE
 unset PWM_AUX_OUT
 unset PWM_AUX_RATE
 unset PWM_MAIN_RATE
