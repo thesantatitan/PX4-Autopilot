@@ -364,12 +364,12 @@ PARAM_DEFINE_FLOAT(GND_RATE_IMAX, 1.0f);
  *
  * @unit rad/s
  * @min 0.0
- * @max 50.0
+ * @max 1.0
  * @decimal 3
  * @increment 0.005
  * @group Rover Position Control
  */
-PARAM_DEFINE_FLOAT(GND_RATE_MAX, 5.0f);
+PARAM_DEFINE_FLOAT(GND_RATE_MAX, 0.5f);
 
 /**
  * Rover Rate Integral Minimum speed

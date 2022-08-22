@@ -263,6 +263,7 @@ RoverPositionControl::control_position(const matrix::Vector2d &current_position,
 		matrix::Vector2f ground_speed_2d(ground_speed);
 
 		float mission_throttle = _param_throttle_cruise.get();
+		float max_yaw_rate = _param_rate_max.get();
 
 		/* Just control the throttle */
 		if (_param_speed_control_mode.get() == 1) {
@@ -322,12 +323,11 @@ RoverPositionControl::control_position(const matrix::Vector2d &current_position,
 					float min_speed = _param_gndspeed_min.get();
 					matrix::Vector2f saturated_speed_2d = (ground_speed_2d.norm() < min_speed) ? ground_speed_2d :
 									      ground_speed_2d.normalized() * min_speed;
-
+					///TODO: Max yaw rate
 					float desired_yaw_rate = _gnd_control.nav_lateral_acceleration_demand() / saturated_speed_2d.norm();
-
 					_rates_sp.roll = 0.0;
 					_rates_sp.pitch = 0.0;
-					_rates_sp.yaw = desired_yaw_rate;
+					_rates_sp.yaw = math::constrain(desired_yaw_rate, -max_yaw_rate, max_yaw_rate);
 					_rates_sp.thrust_body[0] = math::constrain(mission_throttle, 0.0f, 1.0f);
 					_rates_sp.timestamp = hrt_absolute_time();
 					_rates_sp_pub.publish(_rates_sp);
