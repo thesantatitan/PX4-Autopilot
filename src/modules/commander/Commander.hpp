@@ -134,6 +134,8 @@ private:
 
 	void manualControlCheck();
 
+	void offboardControlCheck();
+
 	/**
 	 * @brief Handle incoming vehicle command relavant to Commander
 	 *
