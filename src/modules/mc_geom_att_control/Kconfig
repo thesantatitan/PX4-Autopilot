@@ -1,0 +1,5 @@
+menuconfig MODULES_MC_GEOM_ATT_CONTROL
+	bool "mc_geom_att_control"
+	default n
+	---help---
+		Enable support for mc_geom_att_control
