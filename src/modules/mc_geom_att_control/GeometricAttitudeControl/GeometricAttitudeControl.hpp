@@ -74,19 +74,19 @@ public:
 		_kOmega = kOmega;
 	}
 
-	void setAttitudeSetpoint(matrix::Quatf& att_sp_q){
-		_attitude_setpoint = matrix::Dcmf(_att_sp_q);
+	void setAttitudeSetpoint(matrix::Quatf att_sp_q){
+		_attitude_setpoint = matrix::Dcmf(att_sp_q);
 	}
 
-	void setOmegaSetpoint(matrix::Vector3f& omega_sp){
+	void setOmegaSetpoint(matrix::Vector3f omega_sp){
 		_omega_setpoint = omega_sp;
 	}
 
-	void setOmegaSetpointDot(matrix::Vector3f& omega_sp_dot){
+	void setOmegaSetpointDot(matrix::Vector3f omega_sp_dot){
 		_omega_setpoint_dot = omega_sp_dot;
 	}
 
-	matrix::Vector3f update(matrix::Quatf& att_q, matrix::Vector3f& omega);
+	matrix::Vector3f update(matrix::Quatf att_q, matrix::Vector3f omega);
 
 private:
 	float _kr;

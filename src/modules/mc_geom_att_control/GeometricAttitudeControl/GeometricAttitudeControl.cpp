@@ -46,7 +46,7 @@ matrix::Vector3f GeometricAttitudeControl::update(matrix::Quatf att_q, matrix::V
 	matrix::SquareMatrix3f RtRd = att.transpose() * _attitude_setpoint;
 
 	matrix::Dcmf eR_hat = (RtRd.transpose() - RtRd);
-	matrix::Vector3f eR = 0.5 * eR_hat.vee();
+	matrix::Vector3f eR = 0.5f * eR_hat.vee();
 
 	matrix::Vector3f eOmega = omega - RtRd * _omega_setpoint;
 
