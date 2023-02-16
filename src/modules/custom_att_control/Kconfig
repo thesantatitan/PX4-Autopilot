@@ -1,0 +1,5 @@
+menuconfig MODULES_CUSTOM_ATT_CONTROL
+	bool "custom_attitude_control"
+	default n
+	---help---
+		Enable support for custom_attitude_control
