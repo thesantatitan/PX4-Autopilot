@@ -34,6 +34,7 @@
 #pragma once
 
 #include <lib/rate_control/rate_control.hpp>
+#include <lib/geom_control/geom_att_control.hpp>
 #include <lib/matrix/matrix/math.hpp>
 #include <lib/perf/perf_counter.h>
 #include <px4_platform_common/defines.h>
@@ -61,6 +62,8 @@
 #include <uORB/topics/vehicle_status.h>
 #include <uORB/topics/vehicle_thrust_setpoint.h>
 #include <uORB/topics/vehicle_torque_setpoint.h>
+#include <uORB/topics/vehicle_attitude.h>
+#include <uORB/topics/vehicle_attitude_setpoint.h>
 
 using namespace time_literals;
 
@@ -95,6 +98,7 @@ private:
 	void publishThrustSetpoint(const hrt_abstime &timestamp_sample);
 
 	RateControl _rate_control; ///< class for rate control calculations
+	GeometricAttitudeControl _geom_control;
 
 	uORB::Subscription _battery_status_sub{ORB_ID(battery_status)};
 	uORB::Subscription _control_allocator_status_sub{ORB_ID(control_allocator_status)};
@@ -104,6 +108,8 @@ private:
 	uORB::Subscription _vehicle_land_detected_sub{ORB_ID(vehicle_land_detected)};
 	uORB::Subscription _vehicle_rates_setpoint_sub{ORB_ID(vehicle_rates_setpoint)};
 	uORB::Subscription _vehicle_status_sub{ORB_ID(vehicle_status)};
+	uORB::Subscription _vehicle_attitude_setpoint_sub{ORB_ID(vehicle_attitude_setpoint)};   /**< vehicle attitude setpoint subscription */
+	uORB::Subscription _vehicle_attitude_sub{ORB_ID(vehicle_attitude)};
 
 	uORB::SubscriptionInterval _parameter_update_sub{ORB_ID(parameter_update), 1_s};
 

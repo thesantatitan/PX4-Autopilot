@@ -51,6 +51,10 @@ CustomAttitudeControl::CustomAttitudeControl(bool vtol) :
 {
 	_vehicle_status.vehicle_type = vehicle_status_s::VEHICLE_TYPE_ROTARY_WING;
 
+	_geom_control.setJ(matrix::eye<float, 3>());
+	_geom_control.setKr(0.4);
+	_geom_control.setKOmega(0.4);
+
 	parameters_updated();
 	_controller_status_pub.advertise();
 }
@@ -119,17 +123,23 @@ CustomAttitudeControl::Run()
 
 	/* run controller on gyro changes */
 	vehicle_angular_velocity_s angular_velocity;
+	vehicle_attitude_s attitude;
+	vehicle_attitude_setpoint_s attitude_setpoint;
 
 	if (_vehicle_angular_velocity_sub.update(&angular_velocity)) {
 
 		const hrt_abstime now = angular_velocity.timestamp_sample;
 
 		// Guard against too small (< 0.125ms) and too large (> 20ms) dt's.
-		const float dt = math::constrain(((now - _last_run) * 1e-6f), 0.000125f, 0.02f);
+		// const float dt = math::constrain(((now - _last_run) * 1e-6f), 0.000125f, 0.02f);
 		_last_run = now;
+
+		_vehicle_attitude_sub.update(&attitude);
+		_vehicle_attitude_setpoint_sub.update(&attitude_setpoint);
 
 		const Vector3f rates{angular_velocity.xyz};
 		const Vector3f angular_accel{angular_velocity.xyz_derivative};
+
 
 		/* check for updates in other topics */
 		_vehicle_control_mode_sub.update(&_vehicle_control_mode);
@@ -166,32 +176,8 @@ CustomAttitudeControl::Run()
 		// use rates setpoint topic
 		vehicle_rates_setpoint_s vehicle_rates_setpoint{};
 
-		if (_vehicle_control_mode.flag_control_manual_enabled && !_vehicle_control_mode.flag_control_attitude_enabled) {
-			// generate the rate setpoint from sticks
-			manual_control_setpoint_s manual_control_setpoint;
 
-			if (_manual_control_setpoint_sub.update(&manual_control_setpoint)) {
-				// manual rates control - ACRO mode
-				const Vector3f man_rate_sp{
-					math::superexpo(manual_control_setpoint.roll, _param_mc_acro_expo.get(), _param_mc_acro_supexpo.get()),
-					math::superexpo(-manual_control_setpoint.pitch, _param_mc_acro_expo.get(), _param_mc_acro_supexpo.get()),
-					math::superexpo(manual_control_setpoint.yaw, _param_mc_acro_expo_y.get(), _param_mc_acro_supexpoy.get())};
-
-				_rates_setpoint = man_rate_sp.emult(_acro_rate_max);
-				_thrust_setpoint(2) = -(manual_control_setpoint.throttle + 1.f) * .5f;
-				_thrust_setpoint(0) = _thrust_setpoint(1) = 0.f;
-
-				// publish rate setpoint
-				vehicle_rates_setpoint.roll = _rates_setpoint(0);
-				vehicle_rates_setpoint.pitch = _rates_setpoint(1);
-				vehicle_rates_setpoint.yaw = _rates_setpoint(2);
-				_thrust_setpoint.copyTo(vehicle_rates_setpoint.thrust_body);
-				vehicle_rates_setpoint.timestamp = hrt_absolute_time();
-
-				_vehicle_rates_setpoint_pub.publish(vehicle_rates_setpoint);
-			}
-
-		} else if (_vehicle_rates_setpoint_sub.update(&vehicle_rates_setpoint)) {
+		if (_vehicle_rates_setpoint_sub.update(&vehicle_rates_setpoint)) {
 			if (_vehicle_rates_setpoint_sub.copy(&vehicle_rates_setpoint)) {
 				_rates_setpoint(0) = PX4_ISFINITE(vehicle_rates_setpoint.roll)  ? vehicle_rates_setpoint.roll  : rates(0);
 				_rates_setpoint(1) = PX4_ISFINITE(vehicle_rates_setpoint.pitch) ? vehicle_rates_setpoint.pitch : rates(1);
@@ -200,81 +186,17 @@ CustomAttitudeControl::Run()
 			}
 		}
 
+		_geom_control.setAttitudeSetpoint(matrix::Quatf(attitude_setpoint.q_d));
+		_geom_control.setOmegaSetpoint(_rates_setpoint);
+
+		matrix::Vector3f torque_setpoint = _geom_control.update(matrix::Quatf(attitude.q), matrix::Vector3f(angular_velocity.xyz));
 		// run the rate controller
 		if (_vehicle_control_mode.flag_control_rates_enabled) {
 
-			// reset integral if disarmed
-			if (!_vehicle_control_mode.flag_armed || _vehicle_status.vehicle_type != vehicle_status_s::VEHICLE_TYPE_ROTARY_WING) {
-				_rate_control.resetIntegral();
-			}
-
-			// update saturation status from control allocation feedback
-			control_allocator_status_s control_allocator_status;
-
-			if (_control_allocator_status_sub.update(&control_allocator_status)) {
-				Vector<bool, 3> saturation_positive;
-				Vector<bool, 3> saturation_negative;
-
-				if (!control_allocator_status.torque_setpoint_achieved) {
-					for (size_t i = 0; i < 3; i++) {
-						if (control_allocator_status.unallocated_torque[i] > FLT_EPSILON) {
-							saturation_positive(i) = true;
-
-						} else if (control_allocator_status.unallocated_torque[i] < -FLT_EPSILON) {
-							saturation_negative(i) = true;
-						}
-					}
-				}
-
-				// TODO: send the unallocated value directly for better anti-windup
-				_rate_control.setSaturationStatus(saturation_positive, saturation_negative);
-			}
-
-			// run rate controller
-			const Vector3f att_control = _rate_control.update(rates, _rates_setpoint, angular_accel, dt, _maybe_landed || _landed);
-
-			// publish rate controller status
-			rate_ctrl_status_s rate_ctrl_status{};
-			_rate_control.getRateControlStatus(rate_ctrl_status);
-			rate_ctrl_status.timestamp = hrt_absolute_time();
-			_controller_status_pub.publish(rate_ctrl_status);
-
-			// publish actuator controls
-			actuator_controls_s actuators{};
-			actuators.control[actuator_controls_s::INDEX_ROLL] = PX4_ISFINITE(att_control(0)) ? att_control(0) : 0.0f;
-			actuators.control[actuator_controls_s::INDEX_PITCH] = PX4_ISFINITE(att_control(1)) ? att_control(1) : 0.0f;
-			actuators.control[actuator_controls_s::INDEX_YAW] = PX4_ISFINITE(att_control(2)) ? att_control(2) : 0.0f;
-			actuators.control[actuator_controls_s::INDEX_THROTTLE] = PX4_ISFINITE(_thrust_setpoint(2)) ? -_thrust_setpoint(
-						2) : 0.0f;
-			actuators.control[actuator_controls_s::INDEX_LANDING_GEAR] = _landing_gear;
-			actuators.timestamp_sample = angular_velocity.timestamp_sample;
-
 			if (!_vehicle_status.is_vtol) {
-				publishTorqueSetpoint(att_control, angular_velocity.timestamp_sample);
+				publishTorqueSetpoint(torque_setpoint, angular_velocity.timestamp_sample);
 				publishThrustSetpoint(angular_velocity.timestamp_sample);
 			}
-
-			// scale effort by battery status if enabled
-			if (_param_mc_bat_scale_en.get()) {
-				if (_battery_status_sub.updated()) {
-					battery_status_s battery_status;
-
-					if (_battery_status_sub.copy(&battery_status) && battery_status.connected && battery_status.scale > 0.f) {
-						_battery_status_scale = battery_status.scale;
-					}
-				}
-
-				if (_battery_status_scale > 0.0f) {
-					for (int i = 0; i < 4; i++) {
-						actuators.control[i] *= _battery_status_scale;
-					}
-				}
-			}
-
-			actuators.timestamp = hrt_absolute_time();
-			_actuator_controls_0_pub.publish(actuators);
-
-			updateActuatorControlsStatus(actuators, dt);
 
 		} else if (_vehicle_control_mode.flag_control_termination_enabled) {
 			if (!_vehicle_status.is_vtol) {
