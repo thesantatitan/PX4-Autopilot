@@ -1,0 +1,6 @@
+menuconfig MODULES_CUSTOM_POS_CONTROL
+	bool "custom_pos_control"
+	default n
+	---help---
+		Enable support for custom_pos_control
+
