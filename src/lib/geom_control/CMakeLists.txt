@@ -34,6 +34,8 @@
 px4_add_library(GeometricControl
 	geom_att_control.cpp
 	geom_att_control.hpp
+	geom_pos_control.hpp
+	geom_pos_control.cpp
 )
 target_compile_options(GeometricControl PRIVATE ${MAX_CUSTOM_OPT_LEVEL})
 target_include_directories(GeometricControl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
