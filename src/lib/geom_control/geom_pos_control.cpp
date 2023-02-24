@@ -39,24 +39,25 @@
 
 #include <mathlib/math/Functions.hpp>
 
-
-void GeometricPositionControl::computeDesiredAttitude(matrix::Vector3f position, matrix::Vector3f velocity, matrix::Vector3f acceleration, matrix::Vector3f b1){
+void GeometricPositionControl::computeDesiredAttitude(matrix::Vector3f position, matrix::Vector3f velocity, matrix::Vector3f acceleration, float yaw){
 	matrix::Vector3f ex = position - position_setpoint;
 	matrix::Vector3f ev = velocity - velocity_setpoint;
 	matrix::Vector3f ea = acceleration - acceleration_setpoint;
 
-	matrix::Vector3f A = -kx*ex - kv*ev - m*9.81f*e3 + m*acceleration_setpoint;
-	matrix::Vector3f A_dot = -kx*ev - kv*ea;
+	matrix::Vector3f A = kx*ex + kv*ev + m*9.81f*e3 - m*acceleration_setpoint;
+	matrix::Vector3f A_dot = kx*ev + kv*ea;
 
 	float A_norm = A.norm();
 	matrix::Vector3f b3c = A.unit();
 	matrix::Vector3f b3c_dot = A_dot/A_norm - A*A.dot(A_dot)/(A_norm*A_norm*A_norm);
 
-	matrix::Vector3f b2c = (b3c.cross(b1)).unit();
-	matrix::Vector3f b2c_dot = (b3c_dot.cross(b1)).unit();
+	matrix::Vector3f b1d(cos(yaw), sin(yaw), 0.0f);
+	matrix::Vector3f b1c = b1d - (b1d.dot(b3c))*b3c; //Since b3c is already a unit vector, no need to normalize it here again
+	matrix::Vector3f b2c = b3c.cross(b1c);
 
-	matrix::Vector3f b1c = b2c.cross(b3c);
-	matrix::Vector3f b1c_dot = b2c_dot.cross(b3c) + b2c.cross(b3c_dot);
+	matrix::Vector3f b1d_dot(-sin(yaw), cos(yaw), 0.0f);
+	matrix::Vector3f b1c_dot = b1d_dot - b1d_dot.dot(b3c)*b3c - b1d.dot(b3c_dot)*b3c - b1d.dot(b3c)*b3c_dot;
+	matrix::Vector3f b2c_dot = b3c_dot.cross(b1c_dot);
 
 	{
 		float temp_mat[3][3] = {{b1c(0), b2c(0), b3c(0)}, {b1c(1), b2c(1), b3c(1)}, {b1c(2), b2c(2), b3c(2)}};
@@ -80,6 +81,6 @@ float GeometricPositionControl::updateThrustSetpoint(matrix::Vector3f position, 
 	matrix::Vector3f ev = velocity - velocity_setpoint;
 
 	matrix::Vector3f temp = (kx*ex + kv*ev + m*9.81f*e3 - m*acceleration_setpoint);
-	return temp.dot(attitude*e3);
+	return -temp.dot(attitude*e3);
 }
 

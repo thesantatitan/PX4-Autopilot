@@ -66,9 +66,9 @@ bool CustomPositionControl::init()
 		return false;
 	}
 
-	_pos_control.setKx(0.3);
-	_pos_control.setKv(0.3);
-	_pos_control.setM(0.8);
+	_pos_control.setKx(0.01);
+	_pos_control.setKv(0.01);
+	_pos_control.setM(0.2);
 
 	_time_stamp_last_loop = hrt_absolute_time();
 	ScheduleNow();
@@ -531,10 +531,29 @@ void CustomPositionControl::Run()
 
 			_control.setState(states);
 
+			{
+				matrix::Vector3f temp_setpoint(0.0f,0.0f,0.0f);
+				temp_setpoint(0) = PX4_ISFINITE(_setpoint.position[0])?_setpoint.position[0]:vehicle_local_position.x;
+				temp_setpoint(1) = PX4_ISFINITE(_setpoint.position[1])?_setpoint.position[1]:vehicle_local_position.y;
+				temp_setpoint(2) = PX4_ISFINITE(_setpoint.position[2])?_setpoint.position[2]:vehicle_local_position.z;
+				_pos_control.setPositionSetpoint(temp_setpoint);
+			}
 
-			_pos_control.setPositionSetpoint(matrix::Vector3f(_setpoint.position));
-			_pos_control.setVelocitySetpoint(matrix::Vector3f(_setpoint.velocity));
-			_pos_control.setAccelerationSetpoint(matrix::Vector3f(_setpoint.acceleration));
+			{
+				matrix::Vector3f temp_setpoint(0.0f,0.0f,0.0f);
+				temp_setpoint(0) = PX4_ISFINITE(_setpoint.velocity[0])?_setpoint.velocity[0]:vehicle_local_position.vx;
+				temp_setpoint(1) = PX4_ISFINITE(_setpoint.velocity[1])?_setpoint.velocity[1]:vehicle_local_position.vy;
+				temp_setpoint(2) = PX4_ISFINITE(_setpoint.velocity[2])?_setpoint.velocity[2]:vehicle_local_position.vz;
+				_pos_control.setVelocitySetpoint(temp_setpoint);
+			}
+
+			{
+				matrix::Vector3f temp_setpoint(0.0f,0.0f,0.0f);
+				temp_setpoint(0) = PX4_ISFINITE(_setpoint.acceleration[0])?_setpoint.acceleration[0]:vehicle_local_position.ax;
+				temp_setpoint(1) = PX4_ISFINITE(_setpoint.acceleration[1])?_setpoint.acceleration[1]:vehicle_local_position.ay;
+				temp_setpoint(2) = PX4_ISFINITE(_setpoint.acceleration[2])?_setpoint.acceleration[2]:vehicle_local_position.az;
+				_pos_control.setAccelerationSetpoint(temp_setpoint);
+			}
 
 			// Run position control
 			if (!_control.update(dt)) {
@@ -561,7 +580,7 @@ void CustomPositionControl::Run()
 			vehicle_attitude_s attitude{};
 			_vehicle_attitude_sub.update(&attitude);
 
-			_pos_control.computeDesiredAttitude(matrix::Vector3f(vehicle_local_position.x, vehicle_local_position.y, vehicle_local_position.z), matrix::Vector3f(vehicle_local_position.vx,vehicle_local_position.vy,vehicle_local_position.vz),matrix::Vector3f(vehicle_local_position.ax,vehicle_local_position.ay,vehicle_local_position.az),matrix::Vector3f({1.0f, 0.0f, 0.0f}));
+			_pos_control.computeDesiredAttitude(matrix::Vector3f(vehicle_local_position.x, vehicle_local_position.y, vehicle_local_position.z), matrix::Vector3f(vehicle_local_position.vx,vehicle_local_position.vy,vehicle_local_position.vz),matrix::Vector3f(vehicle_local_position.ax,vehicle_local_position.ay,vehicle_local_position.az),_setpoint.yaw);
 			float thrust = _pos_control.updateThrustSetpoint(matrix::Vector3f(vehicle_local_position.x, vehicle_local_position.y, vehicle_local_position.z),matrix::Vector3f(vehicle_local_position.vx,vehicle_local_position.vy,vehicle_local_position.vz),matrix::Dcmf(matrix::Quatf(attitude.q)));
 			attitude_setpoint.timestamp = hrt_absolute_time();
 			rates_setpoint.timestamp = hrt_absolute_time();

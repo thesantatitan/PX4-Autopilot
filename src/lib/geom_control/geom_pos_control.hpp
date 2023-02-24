@@ -85,7 +85,7 @@ public:
 		return matrix::Vector3f(angular_velocity_setpoint);
 	}
 
-	void computeDesiredAttitude(matrix::Vector3f position, matrix::Vector3f velocity, matrix::Vector3f acceleration, matrix::Vector3f b1);
+	void computeDesiredAttitude(matrix::Vector3f position, matrix::Vector3f velocity, matrix::Vector3f acceleration, float yaw);
 
 	float updateThrustSetpoint(matrix::Vector3f position, matrix::Vector3f velocity, matrix::Dcmf attitude);
 
