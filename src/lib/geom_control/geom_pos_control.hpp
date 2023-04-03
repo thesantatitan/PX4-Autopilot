@@ -46,6 +46,7 @@
 
 #include <matrix/matrix/math.hpp>
 #include <mathlib/math/Limits.hpp>
+#include <uORB/topics/vehicle_local_position_setpoint.h>
 
 class GeometricPositionControl
 {
@@ -63,6 +64,12 @@ public:
 
 	void setM(float _m){
 		m = _m;
+	}
+
+	void setSetpoint(vehicle_local_position_setpoint_s _setpoint){
+		position_setpoint(0) = _setpoint.x;position_setpoint(1) = _setpoint.y;position_setpoint(2) = _setpoint.z;
+		velocity_setpoint(0) = _setpoint.vx;velocity_setpoint(1) = _setpoint.vy;velocity_setpoint(2) = _setpoint.vz;
+		acceleration_setpoint(0) = _setpoint.acceleration[0];acceleration_setpoint(1) = _setpoint.acceleration[1];acceleration_setpoint(2) = _setpoint.acceleration[2];
 	}
 
 	void setPositionSetpoint(matrix::Vector3f _position_setpoint){
