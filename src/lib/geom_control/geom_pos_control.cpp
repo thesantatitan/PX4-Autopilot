@@ -38,6 +38,7 @@
 #include <geom_pos_control.hpp>
 
 #include <mathlib/math/Functions.hpp>
+#include <px4_log.h>
 
 void GeometricPositionControl::computeDesiredAttitude(matrix::Vector3f position, matrix::Vector3f velocity, matrix::Vector3f acceleration, float yaw){
 	matrix::Vector3f ex = position - position_setpoint;
@@ -63,7 +64,8 @@ void GeometricPositionControl::computeDesiredAttitude(matrix::Vector3f position,
 		float temp_mat[3][3] = {{b1c(0), b2c(0), b3c(0)}, {b1c(1), b2c(1), b3c(1)}, {b1c(2), b2c(2), b3c(2)}};
 		Rc = matrix::Dcmf(temp_mat);
 	}
-
+	matrix::Eulerf euler(Rc);
+	// PX4_INFO("R,P,Y: %f, %f,%f",(double)euler(0)*180/3.14, (double)euler(1)*180/3.14, (double)euler(2)*180/3.14);
 	matrix::Dcmf Rc_dot;
 	{
 		float temp_mat[3][3] = {{b1c_dot(0), b2c_dot(0), b3c_dot(0)}, {b1c_dot(1), b2c_dot(1), b3c_dot(1)}, {b1c_dot(2), b2c_dot(2), b3c_dot(2)}};
@@ -80,7 +82,9 @@ float GeometricPositionControl::updateThrustSetpoint(matrix::Vector3f position, 
 	matrix::Vector3f ex = position - position_setpoint;
 	matrix::Vector3f ev = velocity - velocity_setpoint;
 
+	// PX4_INFO("EX: %f, %f, %f",(double)ex(0),(double)ex(1),(double)ex(2));
+	// PX4_INFO("EV: %f, %f, %f",(double)ev(0),(double)ev(1),(double)ev(2));
 	matrix::Vector3f temp = (kx*ex + kv*ev + m*9.81f*e3 - m*acceleration_setpoint);
-	return -temp.dot(attitude*e3);
+	return -temp.dot(attitude*e3)*0.7f/(m*9.81f);
 }
 

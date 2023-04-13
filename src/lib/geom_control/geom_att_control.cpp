@@ -50,13 +50,13 @@ matrix::Vector3f GeometricAttitudeControl::update(matrix::Quatf att_q, matrix::V
 
 	matrix::Vector3f eOmega = omega - RtRd * _omega_setpoint;
 
-	// matrix::Vector3f thirdTerm = omega.hat() * _J * omega;
+	matrix::Vector3f thirdTerm = omega.hat() * _J * omega;
 
-	// matrix::Vector3f fourthTerm = _J * omega.hat() * RtRd * _omega_setpoint;
+	matrix::Vector3f fourthTerm = _J * omega.hat() * RtRd * _omega_setpoint;
 
-	// matrix::Vector3f fifthTerm = _J * RtRd * _omega_setpoint_dot;
+	matrix::Vector3f fifthTerm = _J * RtRd * _omega_setpoint_dot;
 
-	matrix::Vector3f M = -_kr*eR - _kOmega*eOmega;
+	matrix::Vector3f M = -_kr*eR - _kOmega*eOmega + thirdTerm - fourthTerm + fifthTerm;
 
-	return M;
+	return M*0.225;
 }

@@ -1,0 +1,5 @@
+menuconfig MODULES_MC_FULL_CONTROL
+	bool "mc_full_control"
+	default n
+	---help---
+		Enable support for mc_full_control
