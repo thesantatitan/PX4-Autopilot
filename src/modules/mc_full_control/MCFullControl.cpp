@@ -118,7 +118,7 @@ void MCFullControl::Run()
 
 	publishTorqueSetpoint(hrt_absolute_time());
 	publishThrustSetpoint(hrt_absolute_time());
-
+	publishActuatorControls(hrt_absolute_time());
 
 
 	perf_end(_loop_perf);
@@ -149,6 +149,17 @@ void MCFullControl::publishThrustSetpoint(const hrt_abstime &timestamp_sample)
 	_thrust_setpoint.xyz[2] =  _thrust_setpoint.xyz[2]<-1.0f?-1.0f:_thrust_setpoint.xyz[2];
 	// PX4_INFO("Thrust: %f",(double)_thrust_setpoint.xyz[2]);
 	_vehicle_thrust_setpoint_pub.publish(_thrust_setpoint);
+}
+
+void MCFullControl::publishActuatorControls(const hrt_abstime &timestamp_sample)
+{
+	actuator_controls_s actuators{};
+	actuators.control[actuator_controls_s::INDEX_ROLL] = _torque_setpoint.xyz[0];
+	actuators.control[actuator_controls_s::INDEX_PITCH] = _torque_setpoint.xyz[1];
+	actuators.control[actuator_controls_s::INDEX_YAW] = _torque_setpoint.xyz[2];
+	actuators.control[actuator_controls_s::INDEX_THROTTLE] = -_thrust_setpoint.xyz[2];
+	actuators.timestamp_sample = timestamp_sample;
+	_actuator_controls_0_pub.publish(actuators);
 }
 
 
