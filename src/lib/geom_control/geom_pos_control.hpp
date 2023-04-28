@@ -62,6 +62,10 @@ public:
 		kv = _kv;
 	}
 
+	void setKi(float _ki){
+		ki = _ki;
+	}
+
 	void setM(float _m){
 		m = _m;
 	}
@@ -100,12 +104,14 @@ public:
 
 	void computeDesiredAttitude(matrix::Vector3f position, matrix::Vector3f velocity, matrix::Vector3f acceleration, float yaw);
 
-	float updateThrustSetpoint(matrix::Vector3f position, matrix::Vector3f velocity, matrix::Dcmf attitude);
+	float updateThrustSetpoint(matrix::Vector3f position, matrix::Vector3f velocity, matrix::Dcmf attitude, float dt);
 
 private:
 	float kx;
 	float kv;
+	float ki;
 	float m;
+	matrix::Vector3f ei = matrix::Vector3f({0.0f, 0.0f, 0.0f});
 	matrix::Vector3f position_setpoint;
 	matrix::Vector3f velocity_setpoint;
 	matrix::Vector3f acceleration_setpoint;

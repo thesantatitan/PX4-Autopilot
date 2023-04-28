@@ -87,6 +87,8 @@ private:
 	void publishThrustSetpoint(const hrt_abstime &timestamp_sample);
 	void publishActuatorControls(const hrt_abstime &timestamp_sample);
 
+	float _last_run;
+
 	GeometricAttitudeControl 		_att_control;
 	GeometricPositionControl 		_pos_control;
 

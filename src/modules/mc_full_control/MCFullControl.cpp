@@ -53,7 +53,7 @@ bool MCFullControl::init()
 		return false;
 	}
 
-	_pos_control.setKx(0.8);_pos_control.setKv(0.8);_pos_control.setM(4.5);
+	_pos_control.setKx(0.8);_pos_control.setKv(0.8);_pos_control.setM(4.5);_pos_control.setKi(0.01);
 
 	_att_control.setKr(1.0);_att_control.setKOmega(1.0);
 	matrix::SquareMatrix3f inertia;
@@ -92,6 +92,10 @@ void MCFullControl::Run()
 
 
 	_vehicle_local_position_sub.update(&_vehicle_position);
+	float dt = (_vehicle_position.timestamp_sample - _last_run)*1e-6f;
+	_last_run = _vehicle_position.timestamp_sample;
+
+
 	_pos_control.computeDesiredAttitude(
 		matrix::Vector3f(_vehicle_position.x, _vehicle_position.y, _vehicle_position.z),
 		matrix::Vector3f(_vehicle_position.vx, _vehicle_position.vy, _vehicle_position.vz),
@@ -113,7 +117,8 @@ void MCFullControl::Run()
 	_thrust_setpoint.xyz[2] = _pos_control.updateThrustSetpoint(
 		matrix::Vector3f(_vehicle_position.x, _vehicle_position.y, _vehicle_position.z),
 		matrix::Vector3f(_vehicle_position.vx, _vehicle_position.vy, _vehicle_position.vz),
-		matrix::Dcmf(matrix::Quatf(_vehicle_attitude.q))
+		matrix::Dcmf(matrix::Quatf(_vehicle_attitude.q)),
+		dt
 	);
 
 	publishTorqueSetpoint(hrt_absolute_time());
@@ -147,7 +152,7 @@ void MCFullControl::publishThrustSetpoint(const hrt_abstime &timestamp_sample)
 	_thrust_setpoint.timestamp = hrt_absolute_time();
 	_thrust_setpoint.xyz[2] =  _thrust_setpoint.xyz[2]>1.0f?1.0f:_thrust_setpoint.xyz[2];
 	_thrust_setpoint.xyz[2] =  _thrust_setpoint.xyz[2]<-1.0f?-1.0f:_thrust_setpoint.xyz[2];
-	// PX4_INFO("Thrust: %f",(double)_thrust_setpoint.xyz[2]);
+	PX4_INFO("Thrust: %f",(double)_thrust_setpoint.xyz[2]);
 	_vehicle_thrust_setpoint_pub.publish(_thrust_setpoint);
 }
 
