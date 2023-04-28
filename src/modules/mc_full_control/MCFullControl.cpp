@@ -124,6 +124,7 @@ void MCFullControl::Run()
 	publishTorqueSetpoint(hrt_absolute_time());
 	publishThrustSetpoint(hrt_absolute_time());
 	publishActuatorControls(hrt_absolute_time());
+	publishLocalPositionSetpoint(hrt_absolute_time());
 
 
 	perf_end(_loop_perf);
@@ -152,7 +153,7 @@ void MCFullControl::publishThrustSetpoint(const hrt_abstime &timestamp_sample)
 	_thrust_setpoint.timestamp = hrt_absolute_time();
 	_thrust_setpoint.xyz[2] =  _thrust_setpoint.xyz[2]>1.0f?1.0f:_thrust_setpoint.xyz[2];
 	_thrust_setpoint.xyz[2] =  _thrust_setpoint.xyz[2]<-1.0f?-1.0f:_thrust_setpoint.xyz[2];
-	PX4_INFO("Thrust: %f",(double)_thrust_setpoint.xyz[2]);
+	// PX4_INFO("Thrust: %f",(double)_thrust_setpoint.xyz[2]);
 	_vehicle_thrust_setpoint_pub.publish(_thrust_setpoint);
 }
 
@@ -167,6 +168,17 @@ void MCFullControl::publishActuatorControls(const hrt_abstime &timestamp_sample)
 	_actuator_controls_0_pub.publish(actuators);
 }
 
+void MCFullControl::publishLocalPositionSetpoint(const hrt_abstime &timestamp){
+	vehicle_local_position_setpoint_s _local_sp{};
+	_local_sp.timestamp = timestamp;
+	_local_sp.x = _trajectory_setpoint.position[0];
+	_local_sp.y = _trajectory_setpoint.position[1];
+	_local_sp.z = _trajectory_setpoint.position[2];
+	_local_sp.vx = _trajectory_setpoint.velocity[0];
+	_local_sp.vy = _trajectory_setpoint.velocity[1];
+	_local_sp.vz = _trajectory_setpoint.velocity[2];
+	_vehicle_local_position_setpoint_pub.publish(_local_sp);
+}
 
 int MCFullControl::task_spawn(int argc, char *argv[])
 {

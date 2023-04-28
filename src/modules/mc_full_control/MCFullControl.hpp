@@ -58,6 +58,7 @@
 #include <uORB/topics/vehicle_angular_velocity.h>
 #include <uORB/topics/trajectory_setpoint.h>
 #include <uORB/topics/actuator_controls.h>
+#include <uORB/topics/vehicle_local_position_setpoint.h>
 
 using namespace time_literals;
 
@@ -86,6 +87,7 @@ private:
 	void publishTorqueSetpoint(const hrt_abstime &timestamp_sample);
 	void publishThrustSetpoint(const hrt_abstime &timestamp_sample);
 	void publishActuatorControls(const hrt_abstime &timestamp_sample);
+	void publishLocalPositionSetpoint(const hrt_abstime &timestamp_sample);
 
 	float _last_run;
 
@@ -105,6 +107,7 @@ private:
 	uORB::Publication<vehicle_torque_setpoint_s>	_vehicle_torque_setpoint_pub{ORB_ID(vehicle_torque_setpoint)};
 	uORB::Publication<vehicle_thrust_setpoint_s>	_vehicle_thrust_setpoint_pub{ORB_ID(vehicle_thrust_setpoint)};
 	uORB::Publication<actuator_controls_s>		_actuator_controls_0_pub{ORB_ID(actuator_controls_0)};
+	uORB::Publication<vehicle_local_position_setpoint_s> _vehicle_local_position_setpoint_pub{ORB_ID(vehicle_local_position_setpoint)};
 
 	// Subscriptions
 	uORB::SubscriptionCallbackWorkItem _sensor_accel_sub{this, ORB_ID(sensor_accel)};        // subscription that schedules MCFullControl when updated

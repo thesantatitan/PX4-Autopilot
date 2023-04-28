@@ -85,7 +85,7 @@ float GeometricPositionControl::updateThrustSetpoint(matrix::Vector3f position, 
 	ei(0) = PX4_ISFINITE(ei(0))?ei(0):0.0f;
 	ei(1) = PX4_ISFINITE(ei(1))?ei(1):0.0f;
 	ei(2) = PX4_ISFINITE(ei(2))?ei(2):0.0f;
-	PX4_INFO("EI: %f, %f, %f",(double)ei(0),(double)ei(1),(double)ei(2));
+	// PX4_INFO("EI: %f, %f, %f",(double)ei(0),(double)ei(1),(double)ei(2));
 	// PX4_INFO("EV: %f, %f, %f",(double)ev(0),(double)ev(1),(double)ev(2));
 	matrix::Vector3f temp = (kx*ex + kv*ev + m*9.81f*e3 - m*acceleration_setpoint + ki*ei);
 	return -temp.dot(attitude*e3)*0.7f/(m*9.81f);
