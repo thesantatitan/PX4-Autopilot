@@ -67,6 +67,10 @@ public:
 		_kr = kr;
 	}
 
+	void setKi(float ki){
+		_ki = ki;
+	}
+
 	/**
 	 * set proportinal gain for omega
 	*/
@@ -86,11 +90,13 @@ public:
 		_omega_setpoint_dot = omega_sp_dot;
 	}
 
-	matrix::Vector3f update(matrix::Quatf att_q, matrix::Vector3f omega);
+	matrix::Vector3f update(matrix::Quatf att_q, matrix::Vector3f omega, float dt);
 
 private:
 	float _kr;
 	float _kOmega;
+	float _ki;
+	matrix::Vector3f _ei;
 	matrix::SquareMatrix3f _J;
 	matrix::Dcmf _attitude_setpoint;
 	matrix::Vector3f _omega_setpoint;

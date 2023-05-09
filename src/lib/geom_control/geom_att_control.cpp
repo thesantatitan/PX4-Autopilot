@@ -40,13 +40,18 @@
 #include <mathlib/math/Functions.hpp>
 
 
-matrix::Vector3f GeometricAttitudeControl::update(matrix::Quatf att_q, matrix::Vector3f omega){
+matrix::Vector3f GeometricAttitudeControl::update(matrix::Quatf att_q, matrix::Vector3f omega, float dt){
 	matrix::Dcmf att(att_q);
 
 	matrix::SquareMatrix3f RtRd = att.transpose() * _attitude_setpoint;
 
 	matrix::Dcmf eR_hat = (RtRd.transpose() - RtRd);
 	matrix::Vector3f eR = 0.5f * eR_hat.vee();
+
+	_ei = _ei + _ei*dt;
+	_ei(0) = PX4_ISFINITE(_ei(0))?_ei(0):0.0f;
+	_ei(1) = PX4_ISFINITE(_ei(1))?_ei(1):0.0f;
+	_ei(2) = PX4_ISFINITE(_ei(2))?_ei(2):0.0f;
 
 	matrix::Vector3f eOmega = omega - RtRd * _omega_setpoint;
 
@@ -56,7 +61,7 @@ matrix::Vector3f GeometricAttitudeControl::update(matrix::Quatf att_q, matrix::V
 
 	matrix::Vector3f fifthTerm = _J * RtRd * _omega_setpoint_dot;
 
-	matrix::Vector3f M = -_kr*eR - _kOmega*eOmega + thirdTerm - fourthTerm + fifthTerm;
+	matrix::Vector3f M = -_kr*eR - _kOmega*eOmega - _ki*_ei + thirdTerm - fourthTerm + fifthTerm;
 
 	return M*0.225;
 }

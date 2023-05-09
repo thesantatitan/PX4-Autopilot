@@ -53,9 +53,9 @@ bool MCFullControl::init()
 		return false;
 	}
 
-	_pos_control.setKx(0.8);_pos_control.setKv(0.8);_pos_control.setM(4.5);_pos_control.setKi(0.01);
+	_pos_control.setKx(2.5);_pos_control.setKv(2.5);_pos_control.setM(4.5);_pos_control.setKi(0.03);
 
-	_att_control.setKr(1.0);_att_control.setKOmega(1.0);
+	_att_control.setKr(1.0);_att_control.setKOmega(1.0);_att_control.setKi(0.005);
 	matrix::SquareMatrix3f inertia;
 	inertia(0,0) = 0.029125;
 	inertia(1,1) = 0.029125;
@@ -113,7 +113,7 @@ void MCFullControl::Run()
 	_vehicle_attitude_sub.update(&_vehicle_attitude);
 	_vehicle_angular_velocity_sub.update(&_vehicle_angular_velocity);
 
-	_att_control.update(matrix::Quatf(_vehicle_attitude.q), matrix::Vector3f(_vehicle_angular_velocity.xyz)).copyTo(_torque_setpoint.xyz);
+	_att_control.update(matrix::Quatf(_vehicle_attitude.q), matrix::Vector3f(_vehicle_angular_velocity.xyz), dt).copyTo(_torque_setpoint.xyz);
 	_thrust_setpoint.xyz[2] = _pos_control.updateThrustSetpoint(
 		matrix::Vector3f(_vehicle_position.x, _vehicle_position.y, _vehicle_position.z),
 		matrix::Vector3f(_vehicle_position.vx, _vehicle_position.vy, _vehicle_position.vz),

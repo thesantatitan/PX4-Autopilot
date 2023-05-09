@@ -45,8 +45,12 @@ void GeometricPositionControl::computeDesiredAttitude(matrix::Vector3f position,
 	matrix::Vector3f ev = velocity - velocity_setpoint;
 	matrix::Vector3f ea = acceleration - acceleration_setpoint;
 
-	matrix::Vector3f A = kx*ex + kv*ev + m*9.81f*e3 - m*acceleration_setpoint;
-	matrix::Vector3f A_dot = kx*ev + kv*ea;
+	ei(0) = PX4_ISFINITE(ei(0))?ei(0):0.0f;
+	ei(1) = PX4_ISFINITE(ei(1))?ei(1):0.0f;
+	ei(2) = PX4_ISFINITE(ei(2))?ei(2):0.0f;
+
+	matrix::Vector3f A = kx*ex + kv*ev + m*9.81f*e3 - m*acceleration_setpoint + ki*ei;
+	matrix::Vector3f A_dot = kx*ev + kv*ea + ki*ex;
 
 	float A_norm = A.norm();
 	matrix::Vector3f b3c = A.unit();
